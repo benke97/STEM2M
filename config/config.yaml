@@ -9,7 +9,7 @@ hydra:
 # --- Main Configuration ---
 main:
   project_name: "morphology_prediction"
-  seed: 42
+  seed: 67
   task: "train"          # one of: 'train', 'test'
   gpu: true
 
@@ -23,6 +23,11 @@ data:
   point_cloud_size: 1024
   cell_size: 5
   augment: True
+  # If true, eagerly load all needed fields into RAM at startup so __getitem__
+  # never touches the disk. Faster training when CPU/disk are the bottleneck,
+  # but requires enough RAM (rough sizes for the released HDF5 with
+  # image_type=haadf_gan: ~535 MB for 'real' alone, ~24 GB for 'both').
+  in_memory: False
   split:
     use_existing_split: null     # path to a dataset_splits/*.json or null to generate
     val_real_samples: 2000
@@ -30,8 +35,8 @@ data:
     test_real_samples: 1000
     num_synthetic:
     output_dir: "dataset_splits"
-  batch_size: 8
-  num_workers: 4
+  batch_size: 16
+  num_workers: 0
 
 # --- Model Configuration ---
 # All weight paths are relative to the repository root and resolved via
@@ -44,7 +49,7 @@ model:
     embed_dim: 64
     dropout: 0.2
     width_multiplier: 1
-    voxel_resolution_multiplier: 1
+    voxel_resolution_multiplier: 1.0
     use_att: True
     use_pixel_size_embedding: False
     input_channels: 4

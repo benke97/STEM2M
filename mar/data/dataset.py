@@ -64,6 +64,7 @@ class MorphologyDataset(Dataset):
         augment: bool = True,
         pad_with_noise: bool = False,
         noise_std: float = 0.3,
+        in_memory: bool = False,
     ):
         self.hdf5_path = Path(hdf5_path)
         if not self.hdf5_path.exists():
@@ -82,10 +83,14 @@ class MorphologyDataset(Dataset):
         self.augment = augment
         self.pad_with_noise = pad_with_noise
         self.noise_std = noise_std
+        self.in_memory = in_memory
 
-        # Worker-local HDF5 handle (opened lazily — see _h5()).
+        # When in_memory=False, each worker process lazily opens its own HDF5
+        # handle (see _h5()). When in_memory=True, the per-split arrays are
+        # eagerly loaded below into self._mem and the HDF5 file is closed.
         self._h5_handle = None
         self._h5_pid = None
+        self._mem = {} if in_memory else None
 
         # Discover sample counts and build (data_type_flag, local_idx) index list.
         self.indices = []
@@ -103,13 +108,28 @@ class MorphologyDataset(Dataset):
                 n = grp[image_type].shape[0]
                 self.indices.extend([(flag, i) for i in range(n)])
 
+                if in_memory:
+                    log.info(f"Loading /{split} into RAM ...")
+                    self._mem[split] = {
+                        image_type: grp[image_type][:],
+                        self.com_field: grp[self.com_field][:],
+                        "pixel_size": grp["pixel_size"][:],
+                        "pc_x": grp["pc_x"][:],
+                        "pc_y": grp["pc_y"][:],
+                        "pc_z": grp["pc_z"][:],
+                        "pc_label": grp["pc_label"][:],
+                        "pc_ptr": grp["pc_ptr"][:],
+                    }
+                    bytes_loaded = sum(a.nbytes for a in self._mem[split].values())
+                    log.info(f"  /{split}: {n} samples, {bytes_loaded / (1024**3):.2f} GB in RAM")
+
         if not self.indices:
             raise RuntimeError(
                 f"No samples loadable from {self.hdf5_path} for "
                 f"data_type={data_type!r}, image_type={image_type!r}"
             )
 
-        log.info(f"MorphologyDataset: {len(self.indices)} samples from {self.hdf5_path}")
+        log.info(f"MorphologyDataset: {len(self.indices)} samples from {self.hdf5_path} (in_memory={in_memory})")
 
     def __len__(self):
         return len(self.indices)
@@ -121,15 +141,21 @@ class MorphologyDataset(Dataset):
             self._h5_pid = os.getpid()
         return self._h5_handle
 
-    def _read_point_cloud(self, split_grp, local_idx):
+    def _split_data(self, split):
+        """Return a key->array view for `split`, either in-memory dict or h5py group."""
+        if self.in_memory:
+            return self._mem[split]
+        return self._h5()[split]
+
+    def _read_point_cloud(self, split_data, local_idx):
         """Read one variable-length point cloud via the CSR-style pc_ptr index."""
-        ptr = split_grp["pc_ptr"]
+        ptr = split_data["pc_ptr"]
         start = int(ptr[local_idx])
         end = int(ptr[local_idx + 1])
-        x = split_grp["pc_x"][start:end]
-        y = split_grp["pc_y"][start:end]
-        z = split_grp["pc_z"][start:end]
-        label = split_grp["pc_label"][start:end]
+        x = split_data["pc_x"][start:end]
+        y = split_data["pc_y"][start:end]
+        z = split_data["pc_z"][start:end]
+        label = split_data["pc_label"][start:end]
         return x, y, z, label
 
     def _transform_coords_for_augmentation(
@@ -146,8 +172,7 @@ class MorphologyDataset(Dataset):
     def __getitem__(self, idx):
         data_type_flag, local_idx = self.indices[idx]
         split = _TYPE_KEY_MAP[data_type_flag]
-        f = self._h5()
-        grp = f[split]
+        grp = self._split_data(split)
 
         # --- Point cloud: filter to Pt, rescale, pad/sample to fixed length ---
         x, y, z, label = self._read_point_cloud(grp, local_idx)

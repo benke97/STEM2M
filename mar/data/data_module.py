@@ -59,6 +59,7 @@ def setup_dataloaders(cfg_data, seed, task):
             point_cloud_size=cfg_data.point_cloud_size,
             cell_size=cfg_data.cell_size,
             augment=cfg_data.get('augment', True),
+            in_memory=cfg_data.get('in_memory', False),
         )
         log.info(f"Full dataset loaded. Length: {len(full_dataset)}")
     except FileNotFoundError:
