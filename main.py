@@ -99,7 +99,7 @@ def _instantiate_pc_model(cfg: DictConfig, accelerator: Accelerator) -> PVCNN2:
 
     if cfg.model.pc_model.pretrained:
         pc_path = to_absolute_path(cfg.model.pc_model.pretrained_path)
-        checkpoint = torch.load(pc_path, map_location="cpu")
+        checkpoint = torch.load(pc_path, map_location="cpu", weights_only=False)
         if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
             pc_model.load_state_dict(checkpoint["model_state_dict"])
         elif isinstance(checkpoint, PVCNN2):
@@ -127,7 +127,7 @@ def _instantiate_projection_model(cfg: DictConfig, accelerator: Accelerator) -> 
 
     if cfg.model.projection_model.pretrained:
         proj_path = to_absolute_path(cfg.model.projection_model.pretrained_path)
-        checkpoint = torch.load(proj_path, map_location="cpu")
+        checkpoint = torch.load(proj_path, map_location="cpu", weights_only=False)
         projection_model.load_state_dict(checkpoint["model_state_dict"])
         if accelerator.is_main_process:
             log.info(f"Loaded pretrained projection_model weights from {proj_path}")

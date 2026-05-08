@@ -65,7 +65,7 @@ class ResNet18AdaptivePoolFeatureExtractor(nn.Module):
         """
         try:
             # Load the full state dict of the original ResNet18SizeEstimator
-            full_state_dict = torch.load(path, map_location=lambda storage, loc: storage)
+            full_state_dict = torch.load(path, map_location=lambda storage, loc: storage, weights_only=False)
 
             # Create a new state dict containing only the weights for the resnet18 backbone
             backbone_state_dict = {}
