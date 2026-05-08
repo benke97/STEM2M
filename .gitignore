@@ -25,6 +25,10 @@ outputs/
 multirun/
 *.log
 
+# Local launch helpers (env-specific)
+_run_*.bat
+_smoke_*.py
+
 # Checkpoints and weights (download from HuggingFace, see README.md)
 *.pt
 *.pth

@@ -117,7 +117,7 @@ class MorphologyDataset(Dataset):
     def _h5(self):
         """Lazily open the HDF5 file once per worker process."""
         if self._h5_handle is None or self._h5_pid != os.getpid():
-            self._h5_handle = h5py.File(self.hdf5_path, "r", swmr=True)
+            self._h5_handle = h5py.File(self.hdf5_path, "r")
             self._h5_pid = os.getpid()
         return self._h5_handle
 

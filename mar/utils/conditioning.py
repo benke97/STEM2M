@@ -408,7 +408,6 @@ import torch
 from diffusers.schedulers import DDIMScheduler, DDPMScheduler, PNDMScheduler
 from diffusers.schedulers.scheduling_lms_discrete import LMSDiscreteScheduler
 from diffusers import ModelMixin
-from pytorch3d.implicitron.dataset.data_loader_map_provider import FrameData
 from pytorch3d.renderer import PointsRasterizationSettings, PointsRasterizer
 from pytorch3d.renderer.cameras import CamerasBase, OrthographicCameras, FoVOrthographicCameras
 from pytorch3d.structures import Pointclouds
