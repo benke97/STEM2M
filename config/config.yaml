@@ -1,0 +1,166 @@
+# config/config.yaml
+defaults:
+  - _self_
+
+hydra:
+  job:
+    chdir: true
+
+# --- Main Configuration ---
+main:
+  project_name: "monocular_atomic_reconstruction"
+  seed: 42
+  task: "train"          # one of: 'train', 'test'
+  gpu: true
+
+# --- Data Configuration ---
+data:
+  # Path to the combined HDF5 dataset. Replace with your local copy or the
+  # download path described in README.md.
+  dataset_path: "data/combined_dataset.h5"
+  image_type: "haadf_cycleGAN"   # 'haadf_normalized' or 'haadf_cycleGAN'
+  data_type: "real"              # 'real', 'synthetic', or 'both'
+  point_cloud_size: 1024
+  cell_size: 5
+  augment: True
+  split:
+    use_existing_split: null     # path to a dataset_splits/*.json or null to generate
+    val_real_samples: 2000
+    val_split: 0.05
+    test_real_samples: 1000
+    num_synthetic:
+    output_dir: "dataset_splits"
+  batch_size: 8
+  num_workers: 4
+
+# --- Model Configuration ---
+model:
+  sigma_data: 0.17
+  pc_model:
+    name: "pvcnn"
+    embed_dim: 64
+    dropout: 0.2
+    width_multiplier: 1
+    voxel_resolution_multiplier: 1
+    use_att: True
+    use_pixel_size_embedding: False
+    input_channels: 4
+    num_classes: 3
+    extra_feature_channels: 322
+    pretrained: False
+    # Set to a local checkpoint path (e.g. weights downloaded from HuggingFace).
+    pretrained_path: null
+  projection_model:
+    name: "ModernUNet"
+    params:
+      n_channels: 1
+      n_classes: 1
+      init_features: 64
+      num_groups: 8
+    pretrained: False
+    # Path to the thickness predictor weights (download from HF).
+    pretrained_path: null
+  conditioning:
+    use_occlusion: false
+    feature_type: 'encoder'
+    raster_radius: 0.025
+    raster_points_per_pixel: 1
+    depth_epsilon: 0.5
+    features_to_use: [2, 4]
+    binarization_threshold: 0.04
+    use_encoder_features: true
+    use_mask: false
+    use_distance_transform: false
+    use_thickness_map: true
+
+# --- Training Configuration ---
+training:
+  diffusion:
+    scheduler: "ddpm"
+    num_timesteps: 1000
+    beta_schedule: "custom"      # 'linear', 'squaredcos_cap_v2', or 'custom'
+    beta_start: 0.0001
+    beta_end: 0.02
+    alpha_bar_power: 2.5
+    target_alpha_bar_T: 0.0001
+    beta_clip_max: 0.999
+    with_conditioning: true
+    timestep_sampling:
+      strategy: uniform          # 'uniform', 'biased_uniform', or 'loss_aware'
+      biased_start_ratio: 0.5
+      loss_sampling_power: 0.75
+      ema_alpha: 0.999
+      warmup_epochs: 0
+  lambda_existence: 1
+  epochs: 20
+  steps: 500000
+  lambda_rdf: 1
+  use_rdf: false
+  use_amp: true
+  use_size_model: True
+  optimizer:
+    name: "AdamW"
+    lr: 2e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0
+    eps: 1e-8
+  scheduler:
+    name: "LinearLR"             # 'LinearLR', 'CosineAnnealingLR', or 'ReduceLROnPlateau'
+    max_lr: 2e-4
+    pct_start: 0.1
+    warmup_steps: 0
+    warmup_start_factor: 0.01
+    eta_min: 0
+    toral_iters: 500000
+    rop_mode: "min"
+    rop_factor: 0.5
+    rop_patience: 20
+    rop_min_lr: 1e-7
+    rop_verbose: true
+  loss_fn:
+    primary:
+      name: "MSELoss"
+    secondary:
+      name: "None"
+      lpips_weight: 0
+      net_type: "alex"
+      reduction: "mean"
+      normalize: true
+  early_stopping:
+    enabled: false
+    patience: 10
+    min_delta: 0.00005
+    metric_to_monitor: "val_loss_total"
+    mode: "min"
+  checkpoint_dir: "checkpoints"
+  save_best_metric: "val_loss_total"
+  save_best_mode: "min"
+  checkpoint_freq: 1
+  validation_freq: 1
+  use_energy_loss: False
+  lambda_energy_loss: 1
+  energy_loss_threshold: 0.04
+
+# --- Visualization Configuration ---
+visualization:
+  enabled: True
+  freq: 1
+  subdir: "visualizations"
+  image_size: 384
+  point_radius: 0.02
+  points_per_pixel: 5
+  num_samples_to_vis: 32
+  intermediate_vis_sample_idx: 0
+  num_inference_steps: 100
+  color_range: [-1.0, 1.0]
+
+paths:
+  log_dir: "logs"
+  metrics_dir: "training_metrics"
+  output_dir: "RDF"
+
+test:
+  num_samples_to_vis: 10
+
+logging:
+  debug_log_freq: 1

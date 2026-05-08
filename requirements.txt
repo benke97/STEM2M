@@ -1,0 +1,19 @@
+torch>=2.0
+torchvision
+numpy
+scipy
+matplotlib
+pillow
+imageio
+tqdm
+h5py
+hydra-core
+omegaconf
+accelerate
+diffusers
+
+# 3D / point cloud
+pytorch3d
+
+# Note: pytorch3d typically requires installation from source matched to your
+# torch + CUDA version. See https://github.com/facebookresearch/pytorch3d

@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hydra / training outputs
+outputs/
+multirun/
+*.log
+
+# Checkpoints and weights (download from HuggingFace, see README.md)
+*.pt
+*.pth
+*.ckpt
+mar/models/weights/
+
+# Datasets (top-level only — don't shadow mar/data/)
+*.h5
+*.hdf5
+/data/
+/dataset_splits/
+
+# Sample data exception: keep the small set of .npz files in mar/data/exp/
+mar/data/exp/*.npz
+!mar/data/exp/1_1.npz
+!mar/data/exp/10_1.npz
+!mar/data/exp/100_5.npz
+!mar/data/exp/1000_35.npz
+!mar/data/exp/10000_314.npz
