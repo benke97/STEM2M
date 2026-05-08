@@ -628,10 +628,12 @@ def train_conditioned_structure_predictor(accelerator: Accelerator, cfg, model, 
 
     optimizer, lr_scheduler = accelerator.prepare(optimizer, lr_scheduler)
 
-    # --- Size Estimator Setup (Unchanged) ---
+    # --- Size Estimator Setup ---
     size_estimator = None
     if cfg.training.get("use_size_model", False):
-        size_estimator_weights_path = cfg.model.get("size_estimator_weights_path")
+        from hydra.utils import to_absolute_path
+        raw_path = cfg.model.get("size_estimator_weights_path")
+        size_estimator_weights_path = to_absolute_path(raw_path) if raw_path else None
         if accelerator.is_main_process:
             log.info(f"Initializing size estimator from: {size_estimator_weights_path}")
         size_estimator = ResNet18AdaptivePoolFeatureExtractor(

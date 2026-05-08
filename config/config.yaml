@@ -19,7 +19,7 @@ data:
   # HuggingFace dataset linked in README.md).
   dataset_path: "data/morphology_prediction.h5"
   image_type: "haadf_gan"        # 'haadf_norm' or 'haadf_gan'
-  data_type: "real"              # 'real', 'synthetic', or 'both'
+  data_type: "both"              # 'real', 'synthetic', or 'both'
   point_cloud_size: 1024
   cell_size: 5
   augment: True
@@ -34,6 +34,9 @@ data:
   num_workers: 4
 
 # --- Model Configuration ---
+# All weight paths are relative to the repository root and resolved via
+# hydra.utils.to_absolute_path at load time, so they work even with
+# hydra.job.chdir=true. Place downloaded weights in ./weights/ (gitignored).
 model:
   sigma_data: 0.17
   pc_model:
@@ -48,8 +51,7 @@ model:
     num_classes: 3
     extra_feature_channels: 322
     pretrained: False
-    # Set to a local checkpoint path (e.g. weights downloaded from HuggingFace).
-    pretrained_path: null
+    pretrained_path: "weights/best_pc_model.pt"
   projection_model:
     name: "ModernUNet"
     params:
@@ -57,9 +59,10 @@ model:
       n_classes: 1
       init_features: 64
       num_groups: 8
-    pretrained: False
-    # Path to the thickness predictor weights (download from HF).
-    pretrained_path: null
+    pretrained: True
+    pretrained_path: "weights/particle_thickness_predictor_250k_CycleGAN.pt"
+  # Size estimator (ResNet-18 backbone) — used when training.use_size_model=True.
+  size_estimator_weights_path: "weights/ResNet18_Size_estimator_weights.pth"
   conditioning:
     use_occlusion: false
     feature_type: 'encoder'

@@ -37,7 +37,27 @@ The dataset and the best-performing checkpoint for each model component are host
 
 > **Dataset & weights:** [Stemson-AI/Morphology_Prediction](https://huggingface.co/datasets/Stemson-AI/Morphology_Prediction)
 
-Download the HDF5 file (e.g. into `./data/`) and update `data.dataset_path` in `config/config.yaml` to point at it. Download the model checkpoints and update `model.pc_model.pretrained_path` and `model.projection_model.pretrained_path` to enable the released weights.
+### Recommended layout
+
+```
+.
+├── data/
+│   └── morphology_prediction.h5         # contiguous HDF5 dataset
+└── weights/
+    ├── best_pc_model.pt                              # diffusion model (PVCNN2)
+    ├── particle_thickness_predictor_250k_CycleGAN.pt # projection model (ModernUNet) — for haadf_gan
+    ├── particle_thickness_predictor_250k.pt          # projection model — for haadf_norm
+    └── ResNet18_Size_estimator_weights.pth           # size estimator backbone
+```
+
+`config/config.yaml` ships with paths preset to this layout (relative to the repository root). Both `data/` and `weights/` are gitignored. Paths are resolved through `hydra.utils.to_absolute_path` so they keep working under Hydra's `chdir: true`.
+
+**Switching projection model for `haadf_norm` images** — override on the CLI:
+
+```bash
+python main.py data.image_type=haadf_norm \
+  model.projection_model.pretrained_path=weights/particle_thickness_predictor_250k.pt
+```
 
 ### HDF5 layout
 
@@ -91,12 +111,18 @@ python main.py main.task=train
 
 ### Test (inference + visualization on a few samples)
 
+With the layout above (weights downloaded into `./weights/`), `main.task=test` is enough:
+
+```bash
+python main.py main.task=test model.pc_model.pretrained=True
+```
+
+To point at a non-default checkpoint:
+
 ```bash
 python main.py main.task=test \
   model.pc_model.pretrained=True \
-  model.pc_model.pretrained_path=/path/to/pc_model.pt \
-  model.projection_model.pretrained=True \
-  model.projection_model.pretrained_path=/path/to/projection_model.pt
+  model.pc_model.pretrained_path=weights/my_other_pc_model.pt
 ```
 
 ### Multi-GPU
@@ -118,5 +144,4 @@ accelerate launch main.py main.task=train
 
 ## Known TODOs
 
-- [ ] `mar/models/test.py` still has a hardcoded Windows path to the size-estimator weights — wire it through `cfg`.
 - [ ] Add a quickstart script that runs inference end-to-end on the bundled `mar/data/exp/*.npz` samples without needing the full dataset.

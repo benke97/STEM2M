@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from accelerate import Accelerator
 from diffusers import DDIMScheduler, DDPMScheduler
+from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
 from mar.data.data_module import setup_dataloaders
@@ -97,7 +98,8 @@ def _instantiate_pc_model(cfg: DictConfig, accelerator: Accelerator) -> PVCNN2:
     )
 
     if cfg.model.pc_model.pretrained:
-        checkpoint = torch.load(cfg.model.pc_model.pretrained_path, map_location="cpu")
+        pc_path = to_absolute_path(cfg.model.pc_model.pretrained_path)
+        checkpoint = torch.load(pc_path, map_location="cpu")
         if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
             pc_model.load_state_dict(checkpoint["model_state_dict"])
         elif isinstance(checkpoint, PVCNN2):
@@ -107,7 +109,7 @@ def _instantiate_pc_model(cfg: DictConfig, accelerator: Accelerator) -> PVCNN2:
         else:
             raise TypeError(f"Unknown checkpoint type: {type(checkpoint)}")
         if accelerator.is_main_process:
-            log.info(f"Loaded pretrained pc_model weights from {cfg.model.pc_model.pretrained_path}")
+            log.info(f"Loaded pretrained pc_model weights from {pc_path}")
 
     return pc_model
 
@@ -124,12 +126,11 @@ def _instantiate_projection_model(cfg: DictConfig, accelerator: Accelerator) -> 
     )
 
     if cfg.model.projection_model.pretrained:
-        checkpoint = torch.load(cfg.model.projection_model.pretrained_path, map_location="cpu")
+        proj_path = to_absolute_path(cfg.model.projection_model.pretrained_path)
+        checkpoint = torch.load(proj_path, map_location="cpu")
         projection_model.load_state_dict(checkpoint["model_state_dict"])
         if accelerator.is_main_process:
-            log.info(
-                f"Loaded pretrained projection_model weights from {cfg.model.projection_model.pretrained_path}"
-            )
+            log.info(f"Loaded pretrained projection_model weights from {proj_path}")
 
     return projection_model
 
@@ -154,6 +155,7 @@ def main(cfg: DictConfig) -> None:
             log.info(f"Using {accelerator.device.type.upper()} (managed by Accelerate)")
 
     cfg.data.augment = cfg.data.get("augment", True)
+    cfg.data.dataset_path = to_absolute_path(cfg.data.dataset_path)
 
     train_loader, val_loader, test_loader, _ = setup_dataloaders(
         cfg.data, cfg.main.seed, cfg.main.task

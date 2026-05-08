@@ -33,6 +33,7 @@ _smoke_*.py
 *.pt
 *.pth
 *.ckpt
+/weights/
 mar/models/weights/
 
 # Datasets (top-level only — don't shadow mar/data/)

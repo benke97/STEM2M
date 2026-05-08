@@ -3,6 +3,7 @@ from tqdm import tqdm
 from pathlib import Path
 import logging
 from accelerate import Accelerator
+from hydra.utils import to_absolute_path
 from mar.utils.conditioning import condition_point_cloud
 from mar.utils.visualization import visualize_conditioned
 from mar.models.resnet_size_estimator import ResNet18AdaptivePoolFeatureExtractor
@@ -35,16 +36,10 @@ def test_conditioned(accelerator: Accelerator, pc_model, projection_model, test_
     #output_dir = Path(cfg.paths.test_output_dir)
     #output_dir.mkdir(parents=True, exist_ok=True)
     log.info("Initializing size estimator...")
-    size_estimator_weights_path = "C:\\Users\\EMCwo\\Documents\\code\\clean_point_cloud_3d_predict\\experiments\\mar\\models\\weights\\ResNet18_Size_estimator_weights.pth"
-    
-    # Determine the output dimension for the size estimator.
-    # This should match the 'np_size_embed_dim' expected by your PVCNN model.
-    # The original code used '1': ResNet18AdaptivePoolFeatureExtractor(1,1).
-    # If 'cfg.model.np_size_embed_dim' (or a similar config value)
-    # specifies the dimension for PVCNN's np_size_embedding, use that here.
+    size_estimator_weights_path = to_absolute_path(cfg.model.size_estimator_weights_path)
 
     size_estimator = ResNet18AdaptivePoolFeatureExtractor(
-        input_nc=1, 
+        input_nc=1,
         output_feature_dim=64,
         pretrained_estimator_path=size_estimator_weights_path
     )
