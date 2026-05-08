@@ -8,17 +8,17 @@ hydra:
 
 # --- Main Configuration ---
 main:
-  project_name: "monocular_atomic_reconstruction"
+  project_name: "morphology_prediction"
   seed: 42
   task: "train"          # one of: 'train', 'test'
   gpu: true
 
 # --- Data Configuration ---
 data:
-  # Path to the combined HDF5 dataset. Replace with your local copy or the
-  # download path described in README.md.
-  dataset_path: "data/combined_dataset.h5"
-  image_type: "haadf_cycleGAN"   # 'haadf_normalized' or 'haadf_cycleGAN'
+  # Path to the contiguous HDF5 dataset (see regenerate_sim_data.py and the
+  # HuggingFace dataset linked in README.md).
+  dataset_path: "data/morphology_prediction.h5"
+  image_type: "haadf_gan"        # 'haadf_norm' or 'haadf_gan'
   data_type: "real"              # 'real', 'synthetic', or 'both'
   point_cloud_size: 1024
   cell_size: 5

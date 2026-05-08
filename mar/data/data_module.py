@@ -1,14 +1,13 @@
-# src/mar/data/data_module.py
-import torch
-from torch.utils.data import Dataset, DataLoader, Subset
-import numpy as np
-import json
+# mar/data/data_module.py
 import datetime
+import json
+import logging
 from pathlib import Path
-import logging # Use logging
 
-# Import your dataset class
-from .dataset import AtomicReconstructionDataset2, AtomicReconstructionDataset3, AtomicReconstructionDataset5
+import numpy as np
+from torch.utils.data import DataLoader, Subset
+
+from .dataset import MorphologyDataset
 
 log = logging.getLogger(__name__) # Get logger for this module
 
@@ -52,20 +51,14 @@ def setup_dataloaders(cfg_data, seed, task):
                Returns (None, None, None, None) if dataset loading fails.
     """
     log.info("Setting up dataset and dataloaders...")
-    if task == "refinement":
-        refinement_bool = True  
-    else:
-        refinement_bool = False
-    #print(f"Refinement mode: {refinement_bool}")
     try:
-        full_dataset = AtomicReconstructionDataset3(
+        full_dataset = MorphologyDataset(
             hdf5_path=cfg_data.dataset_path,
             data_type=cfg_data.data_type,
             image_type=cfg_data.image_type,
             point_cloud_size=cfg_data.point_cloud_size,
             cell_size=cfg_data.cell_size,
-            augment=cfg_data.get('augment', True), # Pass augment flag
-            refinement=refinement_bool
+            augment=cfg_data.get('augment', True),
         )
         log.info(f"Full dataset loaded. Length: {len(full_dataset)}")
     except FileNotFoundError:

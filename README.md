@@ -1,6 +1,6 @@
-# Monocular Atomic Reconstruction
+# STEM2M — Morphology Prediction
 
-3D point-cloud prediction of nanoparticle atomic structure conditioned on a single HAADF (high-angle annular dark-field) STEM image. A diffusion model (PVCNN++ backbone) generates the 3D structure, conditioned on features extracted from the HAADF image by a U-Net-based projection model.
+3D point-cloud prediction of nanoparticle **morphology** from a single HAADF (high-angle annular dark-field) STEM image. A diffusion model (PVCNN++ backbone) generates the 3D morphology, conditioned on features extracted from the HAADF image by a U-Net-based projection model.
 
 ## Overview
 
@@ -14,28 +14,57 @@ The pipeline has three components:
 
 ```
 .
-├── main.py                  # Hydra entry point (train | test)
-├── config/config.yaml       # Hydra configuration
+├── main.py                      # Hydra entry point (train | test)
+├── config/config.yaml           # Hydra configuration
+├── regenerate_sim_data.py       # Script that produced the contiguous HDF5 layout
 ├── requirements.txt
 ├── mar/
-│   ├── data/                # HDF5 dataset + dataloaders
-│   │   └── exp/             # 5 sample .npz experimental point clouds
+│   ├── data/                    # MorphologyDataset + dataloaders
+│   │   └── exp/                 # 5 sample .npz experimental point clouds
 │   ├── models/
 │   │   ├── modern_unet.py            # U-Net projection model
 │   │   ├── resnet_size_estimator.py  # ResNet18 size estimator
 │   │   ├── train.py                  # training loops
 │   │   ├── test.py                   # inference / visualization
 │   │   └── pvcnn/                    # PVCNN++ diffusion backbone
-│   └── utils/               # diffusion utils, helpers, conditioning, viz, RDF loss
+│   └── utils/                   # diffusion utils, helpers, conditioning, viz, RDF loss
 └── .gitignore
 ```
+
+## Dataset and weights
+
+The dataset and the best-performing checkpoint for each model component are hosted on HuggingFace:
+
+> **Dataset & weights:** [Stemson-AI/Morphology_Prediction](https://huggingface.co/datasets/Stemson-AI/Morphology_Prediction)
+
+Download the HDF5 file (e.g. into `./data/`) and update `data.dataset_path` in `config/config.yaml` to point at it. Download the model checkpoints and update `model.pc_model.pretrained_path` and `model.projection_model.pretrained_path` to enable the released weights.
+
+### HDF5 layout
+
+The dataset uses a contiguous-tensor layout for fast random access. Per split (`real`, `synthetic`):
+
+| Path | Shape | Dtype | Notes |
+|------|-------|-------|-------|
+| `/<split>/haadf_norm` | `(N, 128, 128)` | float32 | Normalized HAADF images |
+| `/<split>/haadf_gan` | `(N, 128, 128)` | float32 | CycleGAN-translated HAADF |
+| `/<split>/thickness_pt` | `(N, 128, 128)` | float32 | Pt-thickness ground truth |
+| `/<split>/com_clean` | `(N, 2)` | float32 | Center-of-mass (clean image) |
+| `/<split>/com_gan` | `(N, 2)` | float32 | Center-of-mass (GAN image) |
+| `/<split>/pixel_size` | `(N,)` | float32 | nm per pixel |
+| `/<split>/sample_ids` | `(N,)` | UTF-8 string | Source sample IDs |
+| `/<split>/pc_x` `pc_y` `pc_z` `pc_label` | `(M_total,)` | float32 | Flattened point clouds |
+| `/<split>/pc_ptr` | `(N+1,)` | uint64 | CSR-style offsets into `pc_*` |
+
+Point cloud `i` in a split is recovered as `pc_x[pc_ptr[i]:pc_ptr[i+1]]` (and similarly for `y`, `z`, `label`). Labels are stored as `Z / 118` (atomic number normalized); `78 / 118` is Pt.
+
+`regenerate_sim_data.py` is the script that converts the original group-per-sample HDF5 into this layout.
 
 ## Installation
 
 ```bash
 # 1. Create an environment (tested with Python 3.10 + CUDA 11.8)
-conda create -n mar python=3.10 -y
-conda activate mar
+conda create -n stem2m python=3.10 -y
+conda activate stem2m
 
 # 2. Install PyTorch matching your CUDA build
 #    See https://pytorch.org/get-started/locally/
@@ -49,25 +78,6 @@ pip install -r requirements.txt
 # 5. Build the PVCNN custom CUDA extensions (compiled on first import)
 #    The C++/CUDA sources live under mar/models/pvcnn/modules/functional/src/.
 ```
-
-## Pretrained weights
-
-Pretrained checkpoints are hosted on HuggingFace Hub. Download the bundle and update the paths in `config/config.yaml`:
-
-- `model.pc_model.pretrained_path` — diffusion model
-- `model.projection_model.pretrained_path` — thickness predictor / U-Net
-
-By default `pretrained: False` so a fresh run trains from scratch. Set both to `True` and provide local paths to use the released weights.
-
-> _TODO: insert HuggingFace link once published._
-
-## Dataset
-
-Training uses an HDF5 dataset combining synthetic and real HAADF/structure pairs. Update `data.dataset_path` in `config/config.yaml` to point at your local copy.
-
-A small set of 5 experimental `.npz` point clouds is included under `mar/data/exp/` so the inference path can be exercised without the full dataset.
-
-> _TODO: link to dataset release._
 
 ## Usage
 
@@ -109,6 +119,4 @@ accelerate launch main.py main.task=train
 ## Known TODOs
 
 - [ ] `mar/models/test.py` still has a hardcoded Windows path to the size-estimator weights — wire it through `cfg`.
-- [ ] Move dataset paths in `config/config.yaml` to environment variables or `.env`.
-- [ ] Publish HuggingFace weights bundle and update README links.
-- [ ] Add a quickstart script that runs inference end-to-end on the bundled `.npz` samples.
+- [ ] Add a quickstart script that runs inference end-to-end on the bundled `mar/data/exp/*.npz` samples without needing the full dataset.
