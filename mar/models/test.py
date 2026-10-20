@@ -35,21 +35,21 @@ def test_conditioned(accelerator: Accelerator, pc_model, projection_model, test_
     # Create output directory if it doesn't exist
     #output_dir = Path(cfg.paths.test_output_dir)
     #output_dir.mkdir(parents=True, exist_ok=True)
-    log.info("Initializing size estimator...")
-    size_estimator_weights_path = to_absolute_path(cfg.model.size_estimator_weights_path)
+    # The size embedding must match how the PC model was trained. The released
+    # best_pc_model.pt was trained without it (training.use_size_model=False).
+    size_estimator = None
+    if cfg.training.get("use_size_model", False):
+        log.info("Initializing size estimator...")
+        size_estimator_weights_path = to_absolute_path(cfg.model.size_estimator_weights_path)
 
-    size_estimator = ResNet18AdaptivePoolFeatureExtractor(
-        input_nc=1,
-        output_feature_dim=64,
-        pretrained_estimator_path=size_estimator_weights_path
-    )
-    # The ResNet18AdaptivePoolFeatureExtractor's __init__ method now handles loading the weights
-    # into its backbone. The load_pretrained_backbone_weights method loads to CPU by default,
-    # which is fine as we move the model to the accelerator.device next.
-    
-    log.info(f"Size estimator initialized. Pretrained weights for backbone loaded from {size_estimator_weights_path}.")
-    size_estimator.to(accelerator.device)
-    size_estimator.eval()
+        size_estimator = ResNet18AdaptivePoolFeatureExtractor(
+            input_nc=1,
+            output_feature_dim=64,
+            pretrained_estimator_path=size_estimator_weights_path
+        )
+        log.info(f"Size estimator initialized. Pretrained weights for backbone loaded from {size_estimator_weights_path}.")
+        size_estimator.to(accelerator.device)
+        size_estimator.eval()
     # Sample from test_loader
     test_iter = iter(test_loader)
     
