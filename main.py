@@ -11,6 +11,7 @@ from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
 from mar.data.data_module import setup_dataloaders
+from mar.models.evaluate import evaluate_refinement
 from mar.models.modern_unet import ModernUNet
 from mar.models.pvcnn.pvcnn import PVCNN2
 from mar.models.test import test_conditioned
@@ -18,6 +19,7 @@ from mar.models.train import (
     train_conditioned_structure_predictor,
     train_unconditioned_structure_predictor,
 )
+from mar.models.train_refinement import train_refinement_model
 from mar.utils.helpers import (
     create_custom_beta_schedule,
     create_custom_beta_schedule_exp,
@@ -83,35 +85,59 @@ def _build_noise_scheduler(cfg: DictConfig):
     raise ValueError(f"Unknown diffusion scheduler: {diff.scheduler}")
 
 
-def _instantiate_pc_model(cfg: DictConfig, accelerator: Accelerator) -> PVCNN2:
-    if cfg.model.pc_model.name != "pvcnn":
-        raise ValueError(f"Unknown pc_model name: {cfg.model.pc_model.name}")
+def _load_pvcnn_weights(model: PVCNN2, path: str, accelerator: Accelerator) -> None:
+    path = to_absolute_path(path)
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        model.load_state_dict(checkpoint["model_state_dict"])
+    elif isinstance(checkpoint, PVCNN2):
+        model.load_state_dict(checkpoint.state_dict())
+    elif isinstance(checkpoint, dict):
+        model.load_state_dict(checkpoint)
+    else:
+        raise TypeError(f"Unknown checkpoint type: {type(checkpoint)}")
+    if accelerator.is_main_process:
+        log.info(f"Loaded PVCNN2 weights from {path}")
 
-    pc_model = PVCNN2(
-        num_classes=cfg.model.pc_model.num_classes,
-        embed_dim=cfg.model.pc_model.embed_dim,
-        dropout=cfg.model.pc_model.dropout,
-        extra_feature_channels=cfg.model.pc_model.extra_feature_channels,
-        width_multiplier=cfg.model.pc_model.width_multiplier,
-        voxel_resolution_multiplier=cfg.model.pc_model.voxel_resolution_multiplier,
-        use_pixel_size_embedding=cfg.model.pc_model.get("use_pixel_size_embedding", True),
+
+def _instantiate_pvcnn(model_cfg: DictConfig) -> PVCNN2:
+    """Builds the PC model or the refinement model (same architecture) from its config section."""
+    if model_cfg.name != "pvcnn":
+        raise ValueError(f"Unknown PVCNN model name: {model_cfg.name}")
+    return PVCNN2(
+        num_classes=model_cfg.num_classes,
+        embed_dim=model_cfg.embed_dim,
+        dropout=model_cfg.dropout,
+        extra_feature_channels=model_cfg.extra_feature_channels,
+        width_multiplier=model_cfg.width_multiplier,
+        voxel_resolution_multiplier=model_cfg.voxel_resolution_multiplier,
+        use_pixel_size_embedding=model_cfg.get("use_pixel_size_embedding", True),
     )
 
-    if cfg.model.pc_model.pretrained:
-        pc_path = to_absolute_path(cfg.model.pc_model.pretrained_path)
-        checkpoint = torch.load(pc_path, map_location="cpu", weights_only=False)
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-            pc_model.load_state_dict(checkpoint["model_state_dict"])
-        elif isinstance(checkpoint, PVCNN2):
-            pc_model.load_state_dict(checkpoint.state_dict())
-        elif isinstance(checkpoint, dict):
-            pc_model.load_state_dict(checkpoint)
-        else:
-            raise TypeError(f"Unknown checkpoint type: {type(checkpoint)}")
-        if accelerator.is_main_process:
-            log.info(f"Loaded pretrained pc_model weights from {pc_path}")
 
+def _instantiate_pc_model(cfg: DictConfig, accelerator: Accelerator) -> PVCNN2:
+    pc_model = _instantiate_pvcnn(cfg.model.pc_model)
+    if cfg.model.pc_model.pretrained:
+        _load_pvcnn_weights(pc_model, cfg.model.pc_model.pretrained_path, accelerator)
     return pc_model
+
+
+def _instantiate_refinement_model(cfg: DictConfig, accelerator: Accelerator) -> PVCNN2:
+    """
+    test_refinement: loads the trained refinement weights.
+    train_refinement: initializes from the PC model weights (as in the paper), unless
+    model.refinement_model.init_from_pc_model=false, in which case pretrained_path is
+    loaded if pretrained=true (e.g. to resume).
+    """
+    ref_cfg = cfg.model.refinement_model
+    refinement_model = _instantiate_pvcnn(ref_cfg)
+    if cfg.main.task == "train_refinement" and ref_cfg.init_from_pc_model:
+        _load_pvcnn_weights(refinement_model, cfg.model.pc_model.pretrained_path, accelerator)
+    elif ref_cfg.pretrained:
+        _load_pvcnn_weights(refinement_model, ref_cfg.pretrained_path, accelerator)
+    elif cfg.main.task == "test_refinement":
+        raise ValueError("test_refinement needs trained weights: set model.refinement_model.pretrained=True")
+    return refinement_model
 
 
 def _instantiate_projection_model(cfg: DictConfig, accelerator: Accelerator) -> ModernUNet:
@@ -165,12 +191,28 @@ def main(cfg: DictConfig) -> None:
             log.error("Failed to setup dataloaders. Exiting.")
         return
 
-    if accelerator.is_main_process:
-        log.info(f"Instantiating diffusion model: {cfg.model.pc_model.name}")
-    pc_model = _instantiate_pc_model(cfg, accelerator)
+    if cfg.main.task not in ("train", "test", "train_refinement", "test_refinement"):
+        if accelerator.is_main_process:
+            log.error(
+                f"Unknown task: {cfg.main.task!r}. Supported tasks: "
+                "'train', 'test', 'train_refinement', 'test_refinement'."
+            )
+        return
+    if cfg.main.task == "test_refinement" and not cfg.model.pc_model.pretrained:
+        raise ValueError("test_refinement needs trained weights: set model.pc_model.pretrained=True")
+
+    # The PC (diffusion) model; train_refinement trains the refinement model instead.
+    if cfg.main.task == "train_refinement":
+        if accelerator.is_main_process:
+            log.info("Instantiating refinement model")
+        pc_model = _instantiate_refinement_model(cfg, accelerator)
+    else:
+        if accelerator.is_main_process:
+            log.info(f"Instantiating diffusion model: {cfg.model.pc_model.name}")
+        pc_model = _instantiate_pc_model(cfg, accelerator)
     if accelerator.is_main_process:
         n_params = sum(p.numel() for p in pc_model.parameters() if p.requires_grad)
-        log.info(f"pc_model: {type(pc_model).__name__} ({n_params:,} params)")
+        log.info(f"Trainable model: {type(pc_model).__name__} ({n_params:,} params)")
 
     if accelerator.is_main_process:
         log.info("Instantiating projection model")
@@ -187,7 +229,29 @@ def main(cfg: DictConfig) -> None:
         pc_model, projection_model, train_loader, val_loader, test_loader
     )
 
-    if cfg.main.task == "train":
+    if cfg.main.task == "train_refinement":
+        train_refinement_model(
+            accelerator=accelerator,
+            cfg=cfg,
+            model=pc_model,
+            projection_model=projection_model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+        )
+    elif cfg.main.task == "test_refinement":
+        if accelerator.is_main_process:
+            log.info("Instantiating refinement model")
+        refinement_model = accelerator.prepare(_instantiate_refinement_model(cfg, accelerator))
+        evaluate_refinement(
+            accelerator=accelerator,
+            pc_model=pc_model,
+            refinement_model=refinement_model,
+            projection_model=projection_model,
+            test_loader=test_loader,
+            noise_scheduler=noise_scheduler,
+            cfg=cfg,
+        )
+    elif cfg.main.task == "train":
         if cfg.training.diffusion.with_conditioning:
             if accelerator.is_main_process:
                 log.info("Training with conditioning...")
@@ -222,11 +286,6 @@ def main(cfg: DictConfig) -> None:
             noise_scheduler=noise_scheduler,
             cfg=cfg,
         )
-    else:
-        if accelerator.is_main_process:
-            log.error(
-                f"Unknown task: {cfg.main.task!r}. Supported tasks in this slim build: 'train', 'test'."
-            )
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ hydra:
 main:
   project_name: "morphology_prediction"
   seed: 67
-  task: "train"          # one of: 'train', 'test'
+  task: "train"          # one of: 'train', 'test', 'train_refinement', 'test_refinement'
   gpu: true
 
 # --- Data Configuration ---
@@ -66,6 +66,21 @@ model:
       num_groups: 8
     pretrained: True
     pretrained_path: "weights/particle_thickness_predictor_250k_CycleGAN.pt"
+  # Refinement model: same PVCNN2 architecture as pc_model, run once at t=0 on the
+  # coarse diffusion output to predict the residual to subtract.
+  refinement_model:
+    name: "pvcnn"
+    embed_dim: 64
+    dropout: 0.2
+    width_multiplier: 1
+    voxel_resolution_multiplier: 1.0
+    use_pixel_size_embedding: False
+    num_classes: 3
+    extra_feature_channels: 322
+    pretrained: True
+    pretrained_path: "weights/refinement_model.pt"
+    # train_refinement: start from pc_model.pretrained_path (how the paper model was trained)
+    init_from_pc_model: True
   # Size estimator (ResNet-18 backbone) — used when training.use_size_model=True.
   size_estimator_weights_path: "weights/ResNet18_Size_estimator_weights.pth"
   conditioning:
@@ -105,7 +120,7 @@ training:
   lambda_rdf: 1
   use_rdf: false
   use_amp: true
-  use_size_model: True
+  use_size_model: False          # the released best_pc_model.pt was trained without it
   optimizer:
     name: "AdamW"
     lr: 2e-4
@@ -148,6 +163,32 @@ training:
   use_energy_loss: False
   lambda_energy_loss: 1
   energy_loss_threshold: 0.04
+
+# --- Refinement + test-time optimization ---
+refinement:
+  # Test-time optimization after refinement (no ground truth used): only z moves.
+  # loss = uniformity_weight * kNN-distance variance + fidelity_weight * MSE to refined
+  optimization:
+    steps: 500
+    lr: 0.1
+    momentum: 0.9
+    uniformity_weight: 1.0
+    fidelity_weight: 0.8
+    knn_ks: [2, 4, 8, 16]
+  # train_refinement: synthetic perturbation of GT point clouds (paper values)
+  training:
+    loss: "Sinkhorn"             # 'Sinkhorn' or 'MSELoss'
+    noise_level: 0.05
+    val_noise_level: 0.06
+    zero_xy_fraction: 0.85       # fraction of points whose noise is z-only
+    train_padding_noise_factor: 3
+    val_padding_noise_factor: 2
+
+# --- Evaluation (test_refinement) ---
+evaluation:
+  num_inference_steps: 100       # DDPM steps for the coarse structure (paper: 10 / 100 / 1000)
+  max_batches: null              # limit for quick checks; null = full test split
+  save_plots: false
 
 # --- Visualization Configuration ---
 visualization:

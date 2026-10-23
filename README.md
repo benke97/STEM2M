@@ -2,13 +2,19 @@
 
 3D point-cloud prediction of nanoparticle **morphology** from a single HAADF (high-angle annular dark-field) STEM image. A diffusion model (PVCNN++ backbone) generates the 3D morphology, conditioned on features extracted from the HAADF image by a U-Net-based projection model.
 
+> **Note:** This repository was cleaned up and packaged from the original research code with the help of [Claude Code](https://claude.com/claude-code). If something does not work or the results do not match the paper, please reach out to **haoel@dtu.dk**.
+
 ## Overview
 
-The pipeline has three components:
+The pipeline has five components. Steps 4 and 5 are required to reproduce the paper results:
 
 1. **Projection model** (`ModernUNet`) — predicts a per-pixel thickness map and intermediate encoder/decoder features from a HAADF image.
 2. **Conditioning** — projects 3D point candidates onto the image plane and samples the U-Net's feature maps at those projected locations to build per-point conditioning vectors.
-3. **Diffusion model** (`PVCNN2`) — a point-voxel CNN trained as a DDPM to denoise 3D point clouds conditioned on the per-point features from step 2.
+3. **Diffusion model** (`PVCNN2`) — a point-voxel CNN trained as a DDPM to denoise 3D point clouds conditioned on the per-point features from step 2. Produces the *coarse* structure.
+4. **Refinement model** (`PVCNN2`, same architecture) — a single forward pass at `t = 0` on the conditioned coarse structure that predicts the residual to subtract. It is initialized from the diffusion model and trained on synthetically perturbed ground-truth structures.
+5. **Test-time optimization** — moves only z (x/y are fixed by the image) with SGD to minimize the variance of k-nearest-neighbour distances (k = 2, 4, 8, 16), plus a fidelity term that keeps the structure close to the refined one. Uses no ground truth.
+
+Steps 3–5 live in [`mar/models/refinement.py`](mar/models/refinement.py).
 
 ## Repository layout
 
@@ -24,7 +30,10 @@ The pipeline has three components:
 │   ├── models/
 │   │   ├── modern_unet.py            # U-Net projection model
 │   │   ├── resnet_size_estimator.py  # ResNet18 size estimator
-│   │   ├── train.py                  # training loops
+│   │   ├── train.py                  # diffusion model training loops
+│   │   ├── train_refinement.py       # refinement model training
+│   │   ├── refinement.py             # coarse sampling, refinement, test-time optimization
+│   │   ├── evaluate.py               # full-pipeline evaluation (test_refinement)
 │   │   ├── test.py                   # inference / visualization
 │   │   └── pvcnn/                    # PVCNN++ diffusion backbone
 │   └── utils/                   # diffusion utils, helpers, conditioning, viz, RDF loss
@@ -45,12 +54,22 @@ The dataset and the best-performing checkpoint for each model component are host
 │   └── morphology_prediction.h5         # contiguous HDF5 dataset
 └── weights/
     ├── best_pc_model.pt                              # diffusion model (PVCNN2)
+    ├── refinement_model.pt                           # refinement model (PVCNN2)
     ├── particle_thickness_predictor_250k_CycleGAN.pt # projection model (ModernUNet) — for haadf_gan
     ├── particle_thickness_predictor_250k.pt          # projection model — for haadf_norm
     └── ResNet18_Size_estimator_weights.pth           # size estimator backbone
 ```
 
-`config/config.yaml` ships with paths preset to this layout (relative to the repository root). Both `data/` and `weights/` are gitignored. Paths are resolved through `hydra.utils.to_absolute_path` so they keep working under Hydra's `chdir: true`.
+`config/config.yaml` ships with paths preset to this layout (relative to the repository root). If your files live elsewhere, override the paths on the command line, e.g.:
+
+```bash
+python main.py data.dataset_path=<path/to/morphology_prediction.h5> \
+  model.pc_model.pretrained_path=<path/to/best_pc_model.pt> \
+  model.refinement_model.pretrained_path=<path/to/refinement_model.pt> \
+  model.projection_model.pretrained_path=<path/to/particle_thickness_predictor_250k_CycleGAN.pt>
+```
+
+ Both `data/` and `weights/` are gitignored. Paths are resolved through `hydra.utils.to_absolute_path` so they keep working under Hydra's `chdir: true`.
 
 **Switching projection model for `haadf_norm` images** — override on the CLI:
 
@@ -124,6 +143,29 @@ python main.py main.task=test \
   model.pc_model.pretrained=True \
   model.pc_model.pretrained_path=weights/my_other_pc_model.pt
 ```
+
+### Reproduce the paper results (coarse → refinement → optimization)
+
+```bash
+python main.py main.task=test_refinement main.seed=42 \
+  data.data_type=both data.in_memory=False data.augment=False \
+  model.pc_model.pretrained=True \
+  evaluation.num_inference_steps=100      # paper: 10, 100 and 1000
+```
+
+`main.seed=42 data.data_type=both` regenerates the exact 1000-sample real test split used in the paper. Other seeds or data types give a different test set. The run writes `refinement_metrics.txt` / `.json` in the Hydra output directory. They contain the 3D and 2D (xy-projected) Chamfer distances and the mean / std of first-nearest-neighbour distances. Each metric is reported for the coarse, refined and refined + optimized structures, in nm (normalized coordinates × `cell_size / 2`). Use `evaluation.max_batches=2` for a quick check and `evaluation.save_plots=True` for per-sample projections.
+
+The test-time optimization runs 500 SGD steps per sample, so a full 1000-sample evaluation takes roughly an hour on a single GPU.
+
+### Train the refinement model
+
+```bash
+python main.py main.task=train_refinement main.seed=42 \
+  data.data_type=both data.batch_size=16 \
+  model.pc_model.pretrained_path=weights/best_pc_model.pt
+```
+
+This initializes the refinement model from the diffusion model and trains it with a Sinkhorn loss, matching the released `refinement_model.pt` (20 epochs, AdamW, lr 2e-4). The perturbation and optimization settings are under `refinement:` in `config/config.yaml`. Training the Sinkhorn loss requires `geomloss`.
 
 ### Multi-GPU
 

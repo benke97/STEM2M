@@ -11,6 +11,7 @@ hydra-core
 omegaconf
 accelerate
 diffusers
+geomloss          # Sinkhorn loss (refinement model training)
 
 # 3D / point cloud
 pytorch3d
